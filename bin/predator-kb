@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# predator-kb - controla o teclado RGB de 4 zonas do Acer Predator (modulo facer)
+# Zonas: 1..4, da esquerda para a direita.
+set -uo pipefail
+
+DYN=/dev/acer-gkbbl-0
+STATIC=/dev/acer-gkbbl-static-0
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/predator-kb"
+PROFILE="$CONF_DIR/profile"
+PROFILES_DIR="$CONF_DIR/profiles"
+mkdir -p "$PROFILES_DIR"
+
+die() { echo "predator-kb: $*" >&2; exit 1; }
+
+check_dev() {
+  [[ -w $DYN && -w $STATIC ]] || die "dispositivos nao disponiveis ($DYN).
+O modulo 'facer' nao esta carregado. Tente: sudo modprobe facer"
+}
+
+# --- estado persistido -------------------------------------------------------
+MODE=3 SPEED=4 BRIGHTNESS=100 DIRECTION=1 RED=0 GREEN=170 BLUE=255
+Z1=0000ff Z2=0000ff Z3=0000ff Z4=0000ff
+
+load_state() { [[ -r $PROFILE ]] && . "$PROFILE"; return 0; }
+
+save_state() {
+  cat > "$PROFILE" <<EOF
+MODE=$MODE
+SPEED=$SPEED
+BRIGHTNESS=$BRIGHTNESS
+DIRECTION=$DIRECTION
+RED=$RED
+GREEN=$GREEN
+BLUE=$BLUE
+Z1=$Z1
+Z2=$Z2
+Z3=$Z3
+Z4=$Z4
+EOF
+}
+
+# --- helpers -----------------------------------------------------------------
+declare -A NAMED=(
+  [off]=000000    [black]=000000  [white]=ffffff  [red]=ff0000
+  [green]=00ff00  [blue]=0000ff   [cyan]=00ffff   [magenta]=ff00ff
+  [yellow]=ffff00 [orange]=ff6600 [purple]=8000ff [pink]=ff0080
+  [lime]=80ff00   [teal]=00ff80   [azul]=0000ff   [vermelho]=ff0000
+  [verde]=00ff00  [amarelo]=ffff00 [roxo]=8000ff  [rosa]=ff0080
+  [laranja]=ff6600 [branco]=ffffff [ciano]=00ffff
+)
+
+# normaliza "#ff0055" / "ff0055" / "red" -> "ff0055"
+norm_hex() {
+  local c=${1,,}; c=${c#\#}
+  [[ -n ${NAMED[$c]:-} ]] && c=${NAMED[$c]}
+  [[ $c =~ ^[0-9a-f]{6}$ ]] || die "cor invalida: '$1' (use RRGGBB, #RRGGBB ou um nome)"
+  printf '%s' "$c"
+}
+
+hex_r() { printf '%d' "0x${1:0:2}"; }
+hex_g() { printf '%d' "0x${1:2:2}"; }
+hex_b() { printf '%d' "0x${1:4:2}"; }
+
+clamp() { local v=$1 lo=$2 hi=$3; (( v < lo )) && v=$lo; (( v > hi )) && v=$hi; printf '%d' "$v"; }
+
+# escreve bytes crus num device
+write_bytes() {
+  local dev=$1; shift
+  local b esc=""
+  for b in "$@"; do esc+=$(printf '\\%03o' "$b"); done
+  printf '%b' "$esc" > "$dev" || die "falha ao escrever em $dev"
+}
+
+# payload dinamico de 16 bytes
+apply_dynamic() {
+  write_bytes "$DYN" \
+    "$MODE" "$SPEED" "$BRIGHTNESS" "$([[ $MODE -eq 3 ]] && echo 8 || echo 0)" \
+    "$DIRECTION" "$RED" "$GREEN" "$BLUE" 0 1 0 0 0 0 0 0
+}
+
+# aplica as 4 zonas estaticas e comita o modo estatico
+apply_static() {
+  local i hex
+  for i in 1 2 3 4; do
+    hex=$(eval "printf '%s' \"\$Z$i\"")
+    write_bytes "$STATIC" "$(( 1 << (i - 1) ))" "$(hex_r "$hex")" "$(hex_g "$hex")" "$(hex_b "$hex")"
+  done
+  write_bytes "$DYN" 0 0 "$BRIGHTNESS" 0 0 0 0 0 0 1 0 0 0 0 0 0
+}
+
+apply() { if (( MODE == 0 )); then apply_static; else apply_dynamic; fi; }
+
+# le -s/-b/-d/-c de uma lista de argumentos
+parse_opts() {
+  while (( $# )); do
+    case $1 in
+      -s|--speed)      SPEED=$(clamp "${2:-4}" 0 9); shift 2 ;;
+      -b|--brightness) BRIGHTNESS=$(clamp "${2:-100}" 0 100); shift 2 ;;
+      -d|--direction)  DIRECTION=$(clamp "${2:-1}" 1 2); shift 2 ;;
+      -c|--color)      local h; h=$(norm_hex "${2:-}"); RED=$(hex_r "$h"); GREEN=$(hex_g "$h"); BLUE=$(hex_b "$h"); shift 2 ;;
+      *) die "opcao desconhecida: $1" ;;
+    esac
+  done
+}
+
+set_effect() {
+  local mode=$1 color=${2:-}; shift 2 || true
+  MODE=$mode
+  if [[ -n $color && ! $color =~ ^- ]]; then
+    local h; h=$(norm_hex "$color")
+    RED=$(hex_r "$h"); GREEN=$(hex_g "$h"); BLUE=$(hex_b "$h")
+  elif [[ -n $color ]]; then
+    set -- "$color" "$@"
+  fi
+  parse_opts "$@"
+  apply; save_state
+}
+
+usage() {
+  cat <<'EOF'
+predator-kb - teclado RGB de 4 zonas do Acer Predator
+
+CORES ESTATICAS
+  predator-kb color <cor>                    todas as 4 zonas na mesma cor
+  predator-kb color <c1> <c2> <c3> <c4>      uma cor por zona (esq -> dir)
+  predator-kb zone <1-4> <cor>               muda so uma zona
+
+EFEITOS
+  predator-kb breath <cor> [opcoes]          respiracao
+  predator-kb neon [opcoes]                  neon (cor fixa do firmware)
+  predator-kb wave [opcoes]                  onda de arco-iris
+  predator-kb shift <cor> [opcoes]           deslizante
+  predator-kb zoom <cor> [opcoes]            zoom
+
+OPCOES        -s <0-9> velocidade   -b <0-100> brilho   -d <1|2> direcao
+
+BRILHO / ENERGIA
+  predator-kb brightness <0-100>             so o brilho
+  predator-kb up | down                      +/- 20 de brilho
+  predator-kb off                            apaga
+  predator-kb on                             reacende no ultimo brilho util
+  predator-kb toggle                         alterna apagado/aceso
+
+PERFIS
+  predator-kb save <nome> | load <nome> | list
+  predator-kb restore                        reaplica o estado atual
+  predator-kb status                         mostra o estado atual
+
+CORES: RRGGBB, #RRGGBB ou nomes (red, azul, cyan, roxo, laranja, ...)
+
+Exemplos:
+  predator-kb color ff0055
+  predator-kb color ff0000 ffaa00 00ff88 0088ff
+  predator-kb wave -s 6 -b 100
+  predator-kb breath 8000ff -s 3
+EOF
+}
+
+# --- main --------------------------------------------------------------------
+load_state
+cmd=${1:-status}; shift || true
+
+case $cmd in
+  color)
+    check_dev
+    (( $# >= 1 )) || die "uso: predator-kb color <cor> [c2 c3 c4]"
+    MODE=0
+    if (( $# == 1 )); then
+      c=$(norm_hex "$1"); Z1=$c; Z2=$c; Z3=$c; Z4=$c
+    elif (( $# >= 4 )); then
+      Z1=$(norm_hex "$1"); Z2=$(norm_hex "$2"); Z3=$(norm_hex "$3"); Z4=$(norm_hex "$4")
+    else
+      die "informe 1 cor (todas as zonas) ou 4 cores (uma por zona)"
+    fi
+    (( BRIGHTNESS == 0 )) && BRIGHTNESS=100
+    apply; save_state ;;
+
+  zone)
+    check_dev
+    (( $# == 2 )) || die "uso: predator-kb zone <1-4> <cor>"
+    z=$(clamp "$1" 1 4); c=$(norm_hex "$2")
+    MODE=0; eval "Z$z=\$c"
+    (( BRIGHTNESS == 0 )) && BRIGHTNESS=100
+    apply; save_state ;;
+
+  breath) check_dev; set_effect 1 "$@" ;;
+  neon)   check_dev; MODE=2; parse_opts "$@"; apply; save_state ;;
+  wave)   check_dev; MODE=3; parse_opts "$@"; apply; save_state ;;
+  shift)  check_dev; set_effect 4 "$@" ;;
+  zoom)   check_dev; set_effect 5 "$@" ;;
+
+  brightness)
+    check_dev
+    (( $# == 1 )) || die "uso: predator-kb brightness <0-100>"
+    BRIGHTNESS=$(clamp "$1" 0 100); apply; save_state ;;
+
+  up)   check_dev; BRIGHTNESS=$(clamp $(( BRIGHTNESS + 20 )) 0 100); apply; save_state
+        echo "brilho: $BRIGHTNESS" ;;
+  down) check_dev; BRIGHTNESS=$(clamp $(( BRIGHTNESS - 20 )) 0 100); apply; save_state
+        echo "brilho: $BRIGHTNESS" ;;
+
+  off)  check_dev; BRIGHTNESS=0; apply; save_state ;;
+  on)   check_dev; (( BRIGHTNESS == 0 )) && BRIGHTNESS=100; apply; save_state ;;
+  toggle)
+    check_dev
+    if (( BRIGHTNESS == 0 )); then BRIGHTNESS=100; else BRIGHTNESS=0; fi
+    apply; save_state ;;
+
+  restore) check_dev; apply ;;
+
+  save)
+    (( $# == 1 )) || die "uso: predator-kb save <nome>"
+    save_state; cp "$PROFILE" "$PROFILES_DIR/$1"; echo "perfil '$1' salvo" ;;
+  load)
+    check_dev
+    (( $# == 1 )) || die "uso: predator-kb load <nome>"
+    [[ -r "$PROFILES_DIR/$1" ]] || die "perfil '$1' nao existe"
+    . "$PROFILES_DIR/$1"; apply; save_state ;;
+  list)
+    echo "Perfis salvos:"; ls -1 "$PROFILES_DIR" 2>/dev/null | sed 's/^/  /' ;;
+
+  status)
+    names=([0]=estatico [1]=respiracao [2]=neon [3]=onda [4]=deslizante [5]=zoom)
+    echo "modo:      ${names[$MODE]} ($MODE)"
+    echo "brilho:    $BRIGHTNESS"
+    if (( MODE == 0 )); then
+      echo "zonas:     #$Z1 #$Z2 #$Z3 #$Z4"
+    else
+      echo "cor:       $(printf '#%02x%02x%02x' "$RED" "$GREEN" "$BLUE")"
+      echo "velocidade:$SPEED   direcao: $DIRECTION"
+    fi
+    [[ -w $DYN ]] || echo "AVISO: modulo facer nao carregado" ;;
+
+  -h|--help|help) usage ;;
+  *) die "comando desconhecido: '$cmd' (use 'predator-kb --help')" ;;
+esac

@@ -1,0 +1,13 @@
+[Unit]
+Description=Reaplica o perfil RGB do teclado Predator
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionPathExists=/dev/acer-gkbbl-0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=%h/.local/bin/predator-kb restore
+
+[Install]
+WantedBy=graphical-session.target
