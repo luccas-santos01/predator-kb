@@ -1,42 +1,48 @@
 # predator-kb
 
-Controle do teclado RGB de 4 zonas dos notebooks **Acer Predator** no Linux,
-com integração opcional ao [Omarchy](https://omarchy.org/).
+4-zone RGB keyboard control for **Acer Predator** laptops on Linux, with an
+optional [Omarchy](https://omarchy.org/) integration.
 
-Testado no **Predator PH315-54** (Helios 300) com kernel 7.2, Hyprland e Omarchy.
+Tested on a **Predator PH315-54** (Helios 300) running kernel 7.2, Hyprland and Omarchy.
 
 ```bash
-predator-kb color ff0055                        # todas as zonas
-predator-kb color ff0000 ffaa00 00ff88 0088ff   # uma cor por zona
-predator-kb wave -s 6                           # onda arco-íris
-predator-kb breath 8000ff -s 3 -b 60            # respiração roxa
+predator-kb color ff0055                        # all four zones
+predator-kb color ff0000 ffaa00 00ff88 0088ff   # one color per zone
+predator-kb wave -s 6                           # rainbow wave
+predator-kb breath 8000ff -s 3 -b 60            # purple breathing
 predator-kb off
 ```
 
-## Por que isso é necessário
+<p align="center">
+  <img src="docs/menu.png" width="330" alt="Omarchy menu showing the Keyboard RGB entry with Color, Effect, Brightness, Profiles, Turn off and Turn on">
+  &nbsp;&nbsp;
+  <img src="docs/effects.png" width="330" alt="The Effect submenu listing Wave, Breath, Neon, Shift and Zoom">
+</p>
 
-O `acer-wmi` que vem no kernel **não expõe o RGB** desse teclado — não há nada em
-`/sys/class/leds`. Os métodos existem no firmware, na interface WMI de gaming da
-Acer (GUID `7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56`), mas só o driver
+## Why this is needed
+
+The kernel's stock `acer-wmi` **doesn't expose this keyboard's RGB** — nothing
+shows up under `/sys/class/leds`. The methods do exist in firmware, behind Acer's
+gaming WMI interface (GUID `7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56`), but only the
 [`facer`](https://github.com/JafarAkhondali/acer-predator-turbo-and-rgb-keyboard-linux-module)
-os implementa.
+driver implements them.
 
-Este projeto **não reimplementa o driver**. Ele instala o `facer` via DKMS e
-entrega em cima dele o que faltava para o uso no dia a dia: uma CLI, persistência
-do perfil entre reboots e suspensões, e a integração com o Omarchy.
+This project **doesn't reimplement the driver**. It installs `facer` through DKMS
+and builds on top of it what was missing for day-to-day use: a CLI, profile
+persistence across reboots and suspends, and the Omarchy integration.
 
-O `facer` cria dois char devices, já com permissão `0666` — nada aqui precisa de
-sudo depois da instalação:
+`facer` exposes two char devices, already mode `0666` — nothing here needs sudo
+after install:
 
-| Device | Payload | Uso |
+| Device | Payload | Purpose |
 |---|---|---|
-| `/dev/acer-gkbbl-static-0` | 4 bytes: `zona_bitmask, R, G, B` | cor fixa por zona |
-| `/dev/acer-gkbbl-0` | 16 bytes: `modo, vel, brilho, flag, dir, R, G, B, 0, 1, …` | efeitos e brilho |
+| `/dev/acer-gkbbl-static-0` | 4 bytes: `zone_bitmask, R, G, B` | per-zone solid color |
+| `/dev/acer-gkbbl-0` | 16 bytes: `mode, speed, brightness, flag, dir, R, G, B, 0, 1, …` | effects and brightness |
 
-## Instalação
+## Install
 
-Requisitos: `dkms`, `git`, `make`, `gcc` e os **headers do seu kernel**
-(`linux-headers`, `linux-lts-headers`, `linux-omarchy-headers`, … conforme o kernel).
+Requirements: `dkms`, `git`, `make`, `gcc` and your **kernel headers**
+(`linux-headers`, `linux-lts-headers`, `linux-omarchy-headers`, … whichever matches).
 
 ```bash
 git clone https://github.com/luccas-santos01/predator-kb.git
@@ -44,104 +50,113 @@ cd predator-kb
 ./install.sh
 ```
 
-Rode como seu usuário normal — o script pede `sudo` só nas partes privilegiadas,
-e precisa de um terminal de verdade para a senha. Use `--no-omarchy` para pular
-o menu e os atalhos.
+Run it as your normal user — the script calls `sudo` only where it must, so it
+needs a real terminal for the password prompt. Pass `--no-omarchy` to skip the
+menu and keybindings.
 
-O instalador verifica o modelo e a presença da WMI de gaming antes de começar,
-compila o `facer` via DKMS (que o recompila sozinho a cada novo kernel) e faz
-blacklist do `acer_wmi` — os dois registram os mesmos GUIDs e não convivem.
+The installer checks your model and the gaming WMI before touching anything,
+builds `facer` through DKMS (which rebuilds it on every new kernel), and
+blacklists `acer_wmi` — both claim the same WMI GUIDs and can't coexist.
 
-> O `facer` é um **fork do `acer-wmi`**, então isso é uma troca de driver, não uma
-> adição. Você não perde funcionalidade; ganha o RGB, o turbo e o controle de fan.
+> `facer` is a **fork of `acer-wmi`**, so this is a driver swap rather than an
+> addition. You don't lose functionality; you gain the RGB, turbo mode and fan
+> control.
 
-Para remover tudo e devolver o `acer_wmi`: `./uninstall.sh`
+To undo everything and restore `acer_wmi`: `./uninstall.sh`
 
-## Uso
+## Usage
 
 ```
-CORES ESTÁTICAS
-  predator-kb color <cor>                    todas as 4 zonas na mesma cor
-  predator-kb color <c1> <c2> <c3> <c4>      uma cor por zona (esq → dir)
-  predator-kb zone <1-4> <cor>               muda só uma zona
+STATIC COLORS
+  predator-kb color <color>                  all four zones, one color
+  predator-kb color <c1> <c2> <c3> <c4>      one color per zone (left to right)
+  predator-kb zone <1-4> <color>             change a single zone
 
-EFEITOS
-  predator-kb breath <cor>                   respiração
-  predator-kb neon                           neon
-  predator-kb wave                           onda de arco-íris
-  predator-kb shift <cor>                    deslizante
-  predator-kb zoom <cor>                     zoom
+EFFECTS
+  predator-kb breath [color] [options]       fade in and out
+  predator-kb neon [options]                 neon glow
+  predator-kb wave [options]                 rainbow wave
+  predator-kb shift [color] [options]        shifting light
+  predator-kb zoom [color] [options]         zoom pulse
 
-OPÇÕES    -s <0-9> velocidade   -b <0-100> brilho   -d <1|2> direção
+OPTIONS       -s <0-9> speed   -b <0-100> brightness   -d <1|2> direction
 
-BRILHO    predator-kb brightness <0-100> | up | down | off | on | toggle
-PERFIS    predator-kb save <nome> | load <nome> | list
-ESTADO    predator-kb status | restore
+BRIGHTNESS    predator-kb brightness <0-100> | up | down | off | on | toggle
+PROFILES      predator-kb save <name> | load <name> | list
+STATE         predator-kb status | restore
 ```
 
-Cores aceitam `RRGGBB`, `#RRGGBB` ou nomes (`red`, `azul`, `roxo`, `laranja`, …).
+Colors accept `RRGGBB`, `#RRGGBB` or a name (`red`, `blue`, `purple`, `orange`, …).
 
-## Persistência
+## Persistence
 
-O firmware reseta o backlight ao reiniciar e ao acordar da suspensão. O instalador
-cobre os dois casos:
+Firmware resets the backlight on reboot and on resume from suspend. The installer
+covers both:
 
-- `~/.config/systemd/user/predator-kb-restore.service` — reaplica no login
-- `/usr/lib/systemd/system-sleep/predator-kb` — reaplica ao acordar
+- `~/.config/systemd/user/predator-kb-restore.service` — re-applies at login
+- `/usr/lib/systemd/system-sleep/predator-kb` — re-applies on wake
 
-Ambos rodam `predator-kb restore`, que lê `~/.config/predator-kb/profile` —
-atualizado a cada comando. Ou seja: o último visual que você usou é o que volta.
+Both run `predator-kb restore`, which reads `~/.config/predator-kb/profile` —
+rewritten by every command. In other words: whatever you last set is what comes back.
 
-## Integração com o Omarchy
+## Omarchy integration
 
-Instalada automaticamente quando `~/.config/omarchy` existe.
+Installed automatically when `~/.config/omarchy` exists.
 
-- **`SUPER + SHIFT + K`** abre "Teclado RGB" no omarchy-menu, com submenus de cor
-  (incluindo cor personalizada por prompt e um degradê por zona), efeito, brilho
-  e perfis
-- **`XF86KbdBrightnessUp/Down`** ajustam o brilho em ±20, se o Fn do seu teclado
-  emitir essas teclas
+| Key | Action |
+|---|---|
+| `SUPER + SHIFT + K` | Open the **Keyboard RGB** menu |
+| `XF86KbdBrightnessUp` | Brightness +20 |
+| `XF86KbdBrightnessDown` | Brightness −20 |
+| `XF86KbdLightOnOff` | Toggle the backlight |
 
-A entrada do menu tem `when: test -w /dev/acer-gkbbl-0`, então some sozinha se o
-driver não estiver carregado.
+Omarchy's stock media bindings point those three keys at
+`/sys/class/leds/*kbd_backlight*`, which Predator laptops don't expose — so they
+fail silently out of the box. The integration `hl.unbind`s them first and takes
+them over.
 
-Os blocos inseridos em `bindings.lua` e `omarchy-menu.jsonc` ficam entre
-marcadores `predator-kb:begin`/`:end`, então reinstalar não duplica e desinstalar
-remove sem deixar resto. Os dois arquivos são copiados para `.bak.<timestamp>`
-antes de qualquer alteração.
+The menu entry carries `when: test -w /dev/acer-gkbbl-0`, so it hides itself if
+the driver isn't loaded. Beyond the presets shown above, **Color → Custom** and
+**Profiles → Save** prompt for free-form input.
 
-## Outros modelos
+Blocks written into `bindings.lua` and `omarchy-menu.jsonc` are wrapped in
+`predator-kb:begin`/`:end` markers, so reinstalling never duplicates them and
+uninstalling leaves nothing behind. Both files are copied to `.bak.<timestamp>`
+before any edit.
 
-O `facer` lista suporte a boa parte da linha Predator/Nitro
-(PH315-52/53/54/55, PH317-53/54, PT315-51, PHN18-71, AN515-58 e outros) —
-veja a [tabela do upstream](https://github.com/JafarAkhondali/acer-predator-turbo-and-rgb-keyboard-linux-module#supported-models).
-Se o seu modelo tem 4 zonas e está nessa lista, isto aqui deve funcionar.
+## Other models
 
-Não há suporte a teclado *per-key* — a limitação é do firmware/WMI, não do driver.
+`facer` claims support for much of the Predator/Nitro line
+(PH315-52/53/54/55, PH317-53/54, PT315-51, PHN18-71, AN515-58 and more) — see the
+[upstream table](https://github.com/JafarAkhondali/acer-predator-turbo-and-rgb-keyboard-linux-module#supported-models).
+If your model has four zones and is on that list, this should work.
 
-O instalador avisa mas não impede a instalação em modelos fora da lista. Se os
-devices aparecerem e o teclado não responder, seu modelo provavelmente precisa de
-um quirk novo no `facer` — o issue vai para o [upstream](https://github.com/JafarAkhondali/acer-predator-turbo-and-rgb-keyboard-linux-module/issues).
+Per-key RGB is not supported — that limit comes from the firmware/WMI, not the driver.
 
-## Diagnóstico
+The installer warns about unknown models but doesn't block. If the device nodes
+appear and the keyboard still doesn't react, your model likely needs a new quirk
+in `facer` — that belongs
+[upstream](https://github.com/JafarAkhondali/acer-predator-turbo-and-rgb-keyboard-linux-module/issues).
+
+## Troubleshooting
 
 ```bash
-dkms status | grep facer      # deve dizer "installed"
-lsmod | grep facer            # deve estar carregado
-ls -l /dev/acer-gkbbl-*       # devem existir, com permissão crw-rw-rw-
+dkms status | grep facer      # should say "installed"
+lsmod | grep facer            # should be loaded
+ls -l /dev/acer-gkbbl-*       # should exist, mode crw-rw-rw-
 sudo dmesg | grep -i facer
 predator-kb status
 ```
 
-Se o RGB parar depois de uma atualização de kernel, quase sempre é o DKMS que não
-recompilou por falta dos headers na versão nova. Instale os headers e rode
+If the RGB stops after a kernel update, it's almost always DKMS failing to
+rebuild because the headers for the new version are missing. Install them and run
 `sudo dkms autoinstall`.
 
-## Créditos
+## Credits
 
-O driver é o [`facer`](https://github.com/JafarAkhondali/acer-predator-turbo-and-rgb-keyboard-linux-module),
-de Jafar Akhondali e contribuidores, licenciado sob GPL-2.0 — é ele que faz o
-trabalho de verdade. Este repositório não redistribui o código dele; o
-`install.sh` clona o upstream na hora da instalação.
+The driver is [`facer`](https://github.com/JafarAkhondali/acer-predator-turbo-and-rgb-keyboard-linux-module)
+by Jafar Akhondali and contributors, licensed GPL-2.0 — it does the real work.
+This repository doesn't redistribute its code; `install.sh` clones upstream at
+install time.
 
-Os scripts deste projeto estão sob licença MIT (veja `LICENSE`).
+The scripts here are MIT licensed (see `LICENSE`).
